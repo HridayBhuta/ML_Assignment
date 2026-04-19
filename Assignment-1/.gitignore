@@ -1,0 +1,5 @@
+# Virtual Enviroments
+.venv/
+
+# Zone Identifier Files
+*.zone.Identifier
