@@ -1,6 +1,6 @@
 """
 Assignment 2
-Team: 15
+Team: 14
 Members:
 - Hriday Bhuta 2023A2PS0901H
 - Naman Jindal 2023AAPS1064H
@@ -12,7 +12,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -33,10 +32,9 @@ from sklearn.inspection import permutation_importance
 
 warnings.filterwarnings('ignore')
 
-# ─── Page Config ──────────────────────────────────────────
 st.set_page_config(
-    page_title="ML Pipeline Dashboard - EHR Clinical Prediction",
-    page_icon="🏥",
+    page_title="ML Pipeline Dashboard",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -56,15 +54,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<p class="main-header">🏥 Automated ML Pipeline for Clinical Prediction under Temporal Shift</p>', unsafe_allow_html=True)
-st.markdown("**BITS Pilani Hyderabad | BITS F464 Machine Learning | Assignment 2 | Team XX**")
+st.markdown('<p class="main-header">Automated ML Pipeline Dashboard</p>', unsafe_allow_html=True)
 st.divider()
 
 CSV_DIR = "csv"
-
-# ═══════════════════════════════════════════════════════════
-# DATA LOADING & PROCESSING
-# ═══════════════════════════════════════════════════════════
 
 @st.cache_data(show_spinner="Loading raw CSV files...")
 def load_raw_data():
@@ -82,7 +75,6 @@ def build_features(_patients, _conditions, _observations, _encounters, split_dat
     observations = _observations.copy()
     encounters = _encounters.copy()
 
-    # ── Parse dates ──────────────────────────────────────
     patients['BIRTHDATE'] = pd.to_datetime(patients['BIRTHDATE'], errors='coerce')
     conditions['START'] = pd.to_datetime(conditions['START'], format='mixed',
                                          dayfirst=True, errors='coerce')
@@ -93,21 +85,16 @@ def build_features(_patients, _conditions, _observations, _encounters, split_dat
 
     split_ts = pd.Timestamp(split_date_str)
 
-    # ── Target: condition per patient ────────────────────
-    # Keep ONLY disorder conditions (actual medical conditions)
     cond_medical = conditions[conditions['DESCRIPTION'].str.contains('disorder', case=False, na=False)].copy()
 
-    # Map each condition to its encounter date
     cond_medical = cond_medical.merge(
         encounters[['Id', 'START']].rename(columns={'Id': 'ENCOUNTER', 'START': 'ENC_DATE'}),
         on='ENCOUNTER', how='left'
     )
 
-    # Split conditions into DS1 (before split) and DS2 (after split)
     cond_ds1 = cond_medical[cond_medical['ENC_DATE'] < split_ts]
     cond_ds2 = cond_medical[cond_medical['ENC_DATE'] >= split_ts]
 
-    # Get top conditions from full data for consistent classes
     top_conditions = cond_medical['DESCRIPTION'].value_counts().head(8).index.tolist()
 
     def get_target(cond_df, top_conds):
@@ -122,12 +109,9 @@ def build_features(_patients, _conditions, _observations, _encounters, split_dat
     target_ds1 = get_target(cond_ds1, top_conditions)
     target_ds2 = get_target(cond_ds2, top_conditions)
 
-    # ── Numeric observations → features ──────────────────
     num_obs = observations[observations['TYPE'] == 'numeric'].copy()
     num_obs['VALUE'] = pd.to_numeric(num_obs['VALUE'], errors='coerce')
     num_obs = num_obs.dropna(subset=['VALUE'])
-
-    # Top 15 most common numeric observation types
     top_obs = num_obs['DESCRIPTION'].value_counts().head(15).index.tolist()
     num_obs = num_obs[num_obs['DESCRIPTION'].isin(top_obs)]
 
@@ -146,7 +130,6 @@ def build_features(_patients, _conditions, _observations, _encounters, split_dat
 
         return agg_mean.join(agg_std, how='outer').reset_index()
 
-    # ── Patient demographics ─────────────────────────────
     ref_date = pd.Timestamp('2025-01-01')
     patients['AGE'] = (ref_date - patients['BIRTHDATE']).dt.days / 365.25
     patients['IS_ALIVE'] = patients['DEATHDATE'].isna().astype(int)
@@ -161,13 +144,11 @@ def build_features(_patients, _conditions, _observations, _encounters, split_dat
     le_eth = LabelEncoder()
     demo['ETHNICITY'] = le_eth.fit_transform(demo['ETHNICITY'].fillna('Unknown'))
 
-    # ── Encounter-based features ─────────────────────────
     enc_count = encounters.groupby('PATIENT').size().reset_index(name='NUM_ENCOUNTERS')
     enc_class = encounters.groupby(['PATIENT', 'ENCOUNTERCLASS']).size().unstack(fill_value=0)
     enc_class.columns = [f'ENC_{c}' for c in enc_class.columns]
     enc_class = enc_class.reset_index()
 
-    # ── Build DS1 and DS2 ────────────────────────────────
     def build_dataset(target_df, demo, num_obs, enc_count, enc_class):
         patient_list = target_df['PATIENT'].tolist()
         obs_feat = build_obs_features(num_obs, patient_list)
@@ -182,7 +163,6 @@ def build_features(_patients, _conditions, _observations, _encounters, split_dat
     ds1 = build_dataset(target_ds1, demo, num_obs, enc_count, enc_class)
     ds2 = build_dataset(target_ds2, demo, num_obs, enc_count, enc_class)
 
-    # Align columns
     all_cols = sorted(set(ds1.columns) | set(ds2.columns))
     for col in all_cols:
         if col not in ds1.columns:
@@ -202,53 +182,42 @@ def get_feature_target(df):
     y = df['CONDITION'].values
     return X, y, features
 
-
-# ═══════════════════════════════════════════════════════════
-# SIDEBAR
-# ═══════════════════════════════════════════════════════════
-st.sidebar.header("⚙️ Pipeline Configuration")
+st.sidebar.header("Pipeline Configuration")
 split_date = st.sidebar.date_input("Temporal Split Date", value=pd.Timestamp("2020-01-01"))
 test_size = st.sidebar.slider("Test Set Size (%)", 10, 40, 20) / 100
 random_state = st.sidebar.number_input("Random State", value=42)
 
-st.sidebar.subheader("🌲 Decision Tree")
+st.sidebar.subheader("Decision Tree")
 dt_max_depth = st.sidebar.slider("DT Max Depth", 2, 30, 8)
 dt_min_samples = st.sidebar.slider("DT Min Samples Split", 2, 20, 3)
 
-st.sidebar.subheader("📐 SVM")
+st.sidebar.subheader("SVM")
 svm_C = st.sidebar.select_slider("SVM C", options=[0.01, 0.1, 1, 10, 100], value=10)
 svm_kernel = st.sidebar.selectbox("SVM Kernel", ["rbf", "linear", "poly"], index=0)
 
-st.sidebar.subheader("🧠 Neural Network (MLP)")
-mlp_hidden = st.sidebar.text_input("MLP Hidden Layers", "64,32")
-mlp_max_iter = st.sidebar.slider("MLP Max Iterations", 100, 1000, 500)
-mlp_alpha = st.sidebar.select_slider("MLP Alpha", options=[0.0001, 0.001, 0.01, 0.1], value=0.01)
+st.sidebar.subheader("Neural Network (MLP)")
+mlp_hidden = st.sidebar.text_input("MLP Hidden Layers", "1024,512")
+mlp_max_iter = st.sidebar.slider("MLP Max Iterations", 100, 2000, 1000)
+mlp_alpha = st.sidebar.select_slider("MLP Alpha", options=[0.0001, 0.001, 0.01, 0.1], value=0.001)
 
-run_pipeline = st.sidebar.button("🚀 Run Full Pipeline", type="primary", use_container_width=True)
+run_pipeline = st.sidebar.button("Run Full Pipeline", type="primary", use_container_width=True)
 
-# ═══════════════════════════════════════════════════════════
-# MAIN TABS
-# ═══════════════════════════════════════════════════════════
 tabs = st.tabs([
-    "📊 Data & EDA",
-    "🔧 Feature Engineering",
-    "🤖 Model Training",
-    "📈 Evaluation & Comparison",
-    "🔄 Continual Learning",
-    "🔍 Model Interpretation"
+    "Data & EDA",
+    "Feature Engineering",
+    "Model Training",
+    "Evaluation & Comparison",
+    "Continual Learning",
+    "Model Interpretation"
 ])
 
-# ─── Load Data ────────────────────────────────────────────
 patients, conditions, observations, encounters = load_raw_data()
 ds1, ds2, le_gender, le_race, le_eth, top_obs, top_conditions = build_features(
     patients, conditions, observations, encounters, str(split_date)
 )
 
-# ═══════════════════════════════════════════════════════════
-# TAB 1: Data & EDA
-# ═══════════════════════════════════════════════════════════
 with tabs[0]:
-    st.header("📊 Data Loading & Exploratory Data Analysis")
+    st.header("Data Loading & Exploratory Data Analysis")
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Patients", f"{len(patients):,}")
@@ -313,14 +282,15 @@ with tabs[0]:
     feature_cols = [c for c in ds1.columns if c not in ['PATIENT', 'CONDITION']]
     corr = ds1[feature_cols].astype(float).corr()
     fig_corr = px.imshow(corr, text_auto=".1f", color_continuous_scale="RdBu_r",
-                         title="Feature Correlation Matrix", height=700)
-    st.plotly_chart(fig_corr, width="stretch")
+                         title="Feature Correlation Matrix", height=1050)
+    fig_corr.update_layout(width=1500, margin=dict(l=140, r=140, t=90, b=140))
+    fig_corr.update_xaxes(tickangle=45)
+    left_pad, center_col, right_pad = st.columns([1, 8, 1])
+    with center_col:
+        st.plotly_chart(fig_corr, width="stretch")
 
-# ═══════════════════════════════════════════════════════════
-# TAB 2: Feature Engineering
-# ═══════════════════════════════════════════════════════════
 with tabs[1]:
-    st.header("🔧 Feature Engineering & Representation")
+    st.header("Feature Engineering & Representation")
 
     st.subheader("Feature Categories")
     st.markdown("""
@@ -355,11 +325,8 @@ with tabs[1]:
     st.subheader("Target Classes (Medical Conditions)")
     st.write(top_conditions)
 
-# ═══════════════════════════════════════════════════════════
-# TAB 3: Model Training
-# ═══════════════════════════════════════════════════════════
 with tabs[2]:
-    st.header("🤖 Model Training & Hyperparameter Tuning")
+    st.header("Model Training & Hyperparameter Tuning")
 
     if run_pipeline or 'models' in st.session_state:
         if run_pipeline or 'models' not in st.session_state:
@@ -476,7 +443,7 @@ with tabs[2]:
                 st.session_state['y2_test'] = y2_test
 
         results = st.session_state['results']
-        st.success("✅ All models trained successfully!")
+        st.success("All models trained successfully!")
 
         # Summary table
         summary = pd.DataFrame({
@@ -495,13 +462,10 @@ with tabs[2]:
         })
         st.dataframe(summary, width="stretch")
     else:
-        st.info("👈 Click **Run Full Pipeline** in the sidebar to train models.")
+        st.info("Click **Run Full Pipeline** in the sidebar to train models.")
 
-# ═══════════════════════════════════════════════════════════
-# TAB 4: Evaluation & Comparison
-# ═══════════════════════════════════════════════════════════
 with tabs[3]:
-    st.header("📈 Model Evaluation & Cross-Dataset Comparison")
+    st.header("Model Evaluation & Cross-Dataset Comparison")
 
     if 'results' in st.session_state:
         results = st.session_state['results']
@@ -531,7 +495,7 @@ with tabs[3]:
             overfit_data.append({'Model': name, 'Set': 'DS2 Test', 'Accuracy': r['ds2_acc']})
         overfit_df = pd.DataFrame(overfit_data)
         fig_over = px.bar(overfit_df, x='Model', y='Accuracy', color='Set', barmode='group',
-                          title="Train vs Test Accuracy – Bias-Variance Analysis",
+                          title="Train vs Test Accuracy - Bias-Variance Analysis",
                           color_discrete_sequence=['#667eea', '#43e97b', '#fa709a'])
         st.plotly_chart(fig_over, width="stretch")
 
@@ -549,11 +513,11 @@ with tabs[3]:
         c1, c2 = st.columns(2)
         with c1:
             fig_cm1 = px.imshow(results[sel_model]['ds1_cm'], text_auto=True,
-                                title=f"{sel_model} – DS1 Test", color_continuous_scale='Blues')
+                                title=f"{sel_model} DS1 Test", color_continuous_scale='Blues')
             st.plotly_chart(fig_cm1, width="stretch")
         with c2:
             fig_cm2 = px.imshow(results[sel_model]['ds2_cm'], text_auto=True,
-                                title=f"{sel_model} – DS2 Test", color_continuous_scale='Purples')
+                                title=f"{sel_model} DS2 Test", color_continuous_scale='Purples')
             st.plotly_chart(fig_cm2, width="stretch")
 
         # ROC Curves
@@ -583,13 +547,10 @@ with tabs[3]:
         fig_roc.update_layout(height=450, title_text="ROC Curves (DS1 Test Set)")
         st.plotly_chart(fig_roc, width="stretch")
     else:
-        st.info("👈 Train models first.")
+        st.info("Train models first.")
 
-# ═══════════════════════════════════════════════════════════
-# TAB 5: Continual Learning
-# ═══════════════════════════════════════════════════════════
 with tabs[4]:
-    st.header("🔄 Continual Learning Implementation")
+    st.header("Continual Learning Implementation")
 
     if 'models' in st.session_state:
         st.markdown("""
@@ -599,7 +560,7 @@ with tabs[4]:
         - **MLP**: Use `warm_start=True` to continue training on DS2 data (true continual learning)
         """)
 
-        if st.button("🔄 Run Continual Learning", type="primary"):
+        if st.button("Run Continual Learning", type="primary"):
             with st.spinner("Performing continual learning..."):
                 scaler = st.session_state['scaler']
                 X1_train = st.session_state['X1_train']
@@ -667,7 +628,7 @@ with tabs[4]:
         if 'cl_results' in st.session_state:
             cl_results = st.session_state['cl_results']
             results = st.session_state['results']
-            st.success("✅ Continual learning complete!")
+            st.success("Continual learning complete!")
 
             # Comparison table
             compare_data = []
@@ -699,25 +660,22 @@ with tabs[4]:
             st.markdown("""
             **Continual Learning Analysis:**
             - Incorporating historical data (DS1) alongside current data (DS2) should improve generalization
-            - MLP with warm_start is a true continual learning approach – it preserves learned weights from DS1
+            - MLP with warm_start is a true continual learning approach it preserves learned weights from DS1
             - Decision Tree and SVM are retrained from scratch on combined data (pseudo-continual learning)
             - Improvement indicates successful knowledge transfer across temporal distributions
             """)
     else:
-        st.info("👈 Train models first.")
+        st.info("Train models first.")
 
-# ═══════════════════════════════════════════════════════════
-# TAB 6: Model Interpretation
-# ═══════════════════════════════════════════════════════════
 with tabs[5]:
-    st.header("🔍 Model Interpretation & Feature Importance")
+    st.header("Model Interpretation & Feature Importance")
 
     if 'models' in st.session_state:
         models = st.session_state['models']
         feat_names = st.session_state['feat_names']
 
         # Decision Tree feature importance
-        st.subheader("🌲 Decision Tree – Feature Importance")
+        st.subheader("Decision Tree Feature Importance")
         dt_model = models['Decision Tree']
         dt_imp = pd.DataFrame({
             'Feature': feat_names,
@@ -731,14 +689,14 @@ with tabs[5]:
         st.plotly_chart(fig_imp, width="stretch")
 
         # Decision Tree visualization
-        st.subheader("🌲 Decision Tree Visualization (limited depth)")
+        st.subheader("Decision Tree Visualization (limited depth)")
         fig_tree, ax_tree = plt.subplots(figsize=(20, 8))
         plot_tree(dt_model, max_depth=3, feature_names=feat_names,
                   filled=True, rounded=True, fontsize=7, ax=ax_tree)
         st.pyplot(fig_tree)
 
         # MLP permutation importance
-        st.subheader("🧠 MLP – Permutation Importance")
+        st.subheader("MLP Permutation Importance")
         if st.button("Compute MLP Permutation Importance"):
             with st.spinner("Computing permutation importance..."):
                 X1_test_s = st.session_state['X1_test_s']
@@ -759,7 +717,7 @@ with tabs[5]:
                 st.plotly_chart(fig_perm, width="stretch")
 
         # Model complexity discussion
-        st.subheader("📝 Model Complexity & Generalization Analysis")
+        st.subheader("Model Complexity & Generalization Analysis")
         st.markdown("""
         ### Bias-Variance Trade-off
 
@@ -781,13 +739,7 @@ with tabs[5]:
         - Different feature representations may benefit different models differently
         """)
     else:
-        st.info("👈 Train models first.")
+        st.info("Train models first.")
 
-# ─── Footer ──────────────────────────────────────────────
-st.divider()
-st.markdown("""
-<div style='text-align: center; color: #888; font-size: 0.85rem;'>
-    BITS Pilani Hyderabad | BITS F464 Machine Learning | Assignment 2 | Team XX<br>
-    Built with Streamlit • scikit-learn • Plotly
-</div>
-""", unsafe_allow_html=True)
+st.markdown("---")
+st.markdown("Team 14 ML Assignment-2")
