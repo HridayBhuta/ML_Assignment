@@ -1,5 +1,8 @@
 # Virtual environments
 venv/
 
+# Python bytecode
+__pycache__/
+
 # Models
 models/
